@@ -6,11 +6,15 @@ from concurrent.futures import FIRST_COMPLETED
 import logging
 import os
 import signal
+import traceback
 
 from colcon_core.executor import ExecutorExtensionPoint
+from colcon_core.logging import colcon_logger
 from colcon_core.plugin_system import satisfies_version
 from colcon_core.subprocess import new_event_loop
 from colcon_core.subprocess import SIGINT_RESULT
+
+logger = colcon_logger.getChild(__name__)
 
 
 class ParallelExecutorExtension(ExecutorExtensionPoint):
@@ -41,8 +45,8 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
     def execute(self, args, jobs, *, abort_on_error=True):  # noqa: D102
         # avoid debug message from asyncio when colcon uses debug log level
-        logger = logging.getLogger('asyncio')
-        logger.setLevel(logging.INFO)
+        asyncio_logger = logging.getLogger('asyncio')
+        asyncio_logger.setLevel(logging.INFO)
 
         loop = new_event_loop()
         asyncio.set_event_loop(loop)
@@ -50,8 +54,11 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         coro = self._execute(args, jobs, abort_on_error=abort_on_error)
         future = asyncio.ensure_future(coro, loop=loop)
         try:
+            logger.debug('run_until_complete')
             loop.run_until_complete(future)
         except KeyboardInterrupt:
+            logger.debug(
+                'run_until_complete was interrupted, run_until_complete again')
             # override job rc with special SIGINT value
             for job in self._ongoing_jobs:
                 job.returncode = SIGINT_RESULT
@@ -59,12 +66,19 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             # wait for jobs which have also received a SIGINT
             loop.run_until_complete(future)
+            logger.debug('run_until_complete finished')
             return signal.SIGINT
-        except Exception:
+        except Exception as e:
+            exc = traceback.format_exc()
+            logger.error(
+                'Exception in job execution: {e}\n{exc}'.format_map(locals()))
             return 1
         finally:
             loop.close()
-        return future.result()
+        result = future.result()
+        logger.debug(
+            "run_until_complete finished with '{result}'".format_map(locals()))
+        return result
 
     async def _execute(self, args, jobs, *, abort_on_error=True):
         # count the number of dependent jobs for each job
