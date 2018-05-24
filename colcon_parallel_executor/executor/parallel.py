@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED
 import logging
 import os
 import signal
+import sys
 import traceback
 
 from colcon_core.executor import ExecutorExtensionPoint
@@ -79,7 +80,12 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 'Exception in job execution: {e}\n{exc}'.format_map(locals()))
             return 1
         finally:
-            loop.close()
+            # HACK on Windows closing the event loop seems to hang after Ctrl-C
+            # even though no futures are pending
+            if sys.platform != 'win32':
+                logger.debug('closing loop')
+                loop.close()
+                logger.debug('loop closed')
         result = future.result()
         logger.debug(
             "run_until_complete finished with '{result}'".format_map(locals()))
