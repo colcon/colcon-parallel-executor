@@ -2,10 +2,12 @@
 # Licensed under the Apache License, Version 2.0
 
 import asyncio
+from concurrent.futures import ALL_COMPLETED
 from concurrent.futures import FIRST_COMPLETED
 import logging
 import os
 import signal
+import sys
 import traceback
 
 from colcon_core.executor import ExecutorExtensionPoint
@@ -57,15 +59,19 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             logger.debug('run_until_complete')
             loop.run_until_complete(future)
         except KeyboardInterrupt:
-            logger.debug(
-                'run_until_complete was interrupted, run_until_complete again')
+            logger.debug('run_until_complete was interrupted')
             # override job rc with special SIGINT value
             for job in self._ongoing_jobs:
                 job.returncode = SIGINT_RESULT
             # ignore further SIGINTs
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             # wait for jobs which have also received a SIGINT
-            loop.run_until_complete(future)
+            if not future.done():
+                logger.debug('run_until_complete again')
+                loop.run_until_complete(future)
+                assert future.done()
+            # read potential exception to avoid asyncio error
+            _ = future.exception()
             logger.debug('run_until_complete finished')
             return signal.SIGINT
         except Exception as e:
@@ -74,7 +80,12 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 'Exception in job execution: {e}\n{exc}'.format_map(locals()))
             return 1
         finally:
-            loop.close()
+            # HACK on Windows closing the event loop seems to hang after Ctrl-C
+            # even though no futures are pending
+            if sys.platform != 'win32':
+                logger.debug('closing loop')
+                loop.close()
+                logger.debug('loop closed')
         result = future.result()
         logger.debug(
             "run_until_complete finished with '{result}'".format_map(locals()))
@@ -154,8 +165,9 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             # if any job failed cancel pending futures
             if rc and abort_on_error:
                 for future in futures.keys():
-                    future.cancel()
-                await asyncio.gather(*futures)
+                    if not future.done():
+                        future.cancel()
+                await asyncio.wait(futures.keys(), return_when=ALL_COMPLETED)
                 # collect results from canceled futures
                 for future, job in futures.items():
                     result = future.result()
