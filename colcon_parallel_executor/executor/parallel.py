@@ -164,14 +164,16 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
             # if any job failed cancel pending futures
             if rc and abort_on_error:
-                for future in futures.keys():
-                    if not future.done():
-                        future.cancel()
-                await asyncio.wait(futures.keys(), return_when=ALL_COMPLETED)
-                # collect results from canceled futures
-                for future, job in futures.items():
-                    result = future.result()
-                    finished_jobs[job.identifier] = result
+                if futures:
+                    for future in futures.keys():
+                        if not future.done():
+                            future.cancel()
+                    await asyncio.wait(
+                        futures.keys(), return_when=ALL_COMPLETED)
+                    # collect results from canceled futures
+                    for future, job in futures.items():
+                        result = future.result()
+                        finished_jobs[job.identifier] = result
                 break
 
         # if any job failed
