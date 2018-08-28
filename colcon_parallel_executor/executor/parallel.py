@@ -156,14 +156,22 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                     result = signal.SIGINT
                 elif done_future.exception():
                     result = done_future.exception()
+                    if isinstance(result, KeyboardInterrupt):
+                        result = signal.SIGINT
                 else:
                     result = done_future.result()
+                    if result == SIGINT_RESULT:
+                        result = signal.SIGINT
                 finished_jobs[job.identifier] = result
-                if result and not rc:
+                # if any job returned a SIGINT overwrite the return code
+                # this should override a potentially earlier set error code
+                # in the case where abort_on_error isn't set
+                # otherwise set the error code if it is the first
+                if result == signal.SIGINT or result and not rc:
                     rc = result
 
-            # if any job failed cancel pending futures
-            if rc and abort_on_error:
+            # if any job failed or was interrupted cancel pending futures
+            if (rc and abort_on_error) or rc == signal.SIGINT:
                 if futures:
                     for future in futures.keys():
                         if not future.done():
