@@ -74,7 +74,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             _ = future.exception()
             logger.debug('run_until_complete finished')
             return signal.SIGINT
-        except Exception as e:
+        except Exception as e:  # noqa: F841
             exc = traceback.format_exc()
             logger.error(
                 'Exception in job execution: {e}\n{exc}'.format_map(locals()))
