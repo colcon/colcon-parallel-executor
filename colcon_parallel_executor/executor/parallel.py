@@ -11,6 +11,7 @@ import sys
 import traceback
 
 from colcon_core.executor import ExecutorExtensionPoint
+from colcon_core.executor import OnError
 from colcon_core.logging import colcon_logger
 from colcon_core.plugin_system import satisfies_version
 from colcon_core.subprocess import new_event_loop
@@ -45,7 +46,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             help='The maximum number of packages to process in parallel '
                  '(default: {max_workers_default})'.format_map(locals()))
 
-    def execute(self, args, jobs, *, abort_on_error=True):  # noqa: D102
+    def execute(self, args, jobs, *, on_error=OnError.interrupt):  # noqa: D102
         # avoid debug message from asyncio when colcon uses debug log level
         asyncio_logger = logging.getLogger('asyncio')
         asyncio_logger.setLevel(logging.INFO)
@@ -53,7 +54,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         loop = new_event_loop()
         asyncio.set_event_loop(loop)
 
-        coro = self._execute(args, jobs, abort_on_error=abort_on_error)
+        coro = self._execute(args, jobs, on_error=on_error)
         future = asyncio.ensure_future(coro, loop=loop)
         try:
             logger.debug('run_until_complete')
@@ -91,7 +92,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             "run_until_complete finished with '{result}'".format_map(locals()))
         return result
 
-    async def _execute(self, args, jobs, *, abort_on_error=True):
+    async def _execute(self, args, jobs, *, on_error):
         # count the number of dependent jobs for each job
         # in order to process jobs with more dependent jobs first
         recursive_dependent_counts = {}
@@ -104,6 +105,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         futures = {}
         finished_jobs = {}
         rc = 0
+        jobs = jobs.copy()
         while jobs or futures:
             # determine "ready" jobs
             ready_jobs = []
@@ -165,13 +167,24 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 finished_jobs[job.identifier] = result
                 # if any job returned a SIGINT overwrite the return code
                 # this should override a potentially earlier set error code
-                # in the case where abort_on_error isn't set
+                # in the case where on_error isn't set to OnError.interrupt
                 # otherwise set the error code if it is the first
-                if result == signal.SIGINT or result and not rc:
+                if result is signal.SIGINT or result and not rc:
                     rc = result
 
+                if result:
+                    if on_error in (OnError.interrupt, OnError.skip_pending):
+                        # skip pending jobs
+                        jobs.clear()
+
+                    if on_error == OnError.skip_downstream:
+                        # skip downstream jobs of failed one
+                        for pending_name, pending_job in list(jobs.items()):
+                            if job.identifier in pending_job.dependencies:
+                                del jobs[pending_name]
+
             # if any job failed or was interrupted cancel pending futures
-            if (rc and abort_on_error) or rc == signal.SIGINT:
+            if (rc and on_error == OnError.interrupt) or rc is signal.SIGINT:
                 if futures:
                     for future in futures.keys():
                         if not future.done():
