@@ -4,6 +4,7 @@
 import asyncio
 from concurrent.futures import ALL_COMPLETED
 from concurrent.futures import FIRST_COMPLETED
+from contextlib import suppress
 import logging
 import os
 import signal
@@ -38,12 +39,10 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
     def add_arguments(self, *, parser):  # noqa: D102
         max_workers_default = os.cpu_count() or 4
-        try:
+        with suppress(AttributeError):
             # consider restricted set of CPUs if applicable
             max_workers_default = min(
                 max_workers_default, len(os.sched_getaffinity(0)))
-        except AttributeError:
-            pass
         parser.add_argument(
             '--parallel-workers',
             type=int,
