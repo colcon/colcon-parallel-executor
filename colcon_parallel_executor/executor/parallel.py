@@ -45,6 +45,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 max_workers_default, len(os.sched_getaffinity(0)))
         parser.add_argument(
             '--parallel-workers',
+            '-j', '--jobs',  # Bonus aliases for maximum flexibility
             type=int,
             default=max_workers_default,
             metavar='NUMBER',
