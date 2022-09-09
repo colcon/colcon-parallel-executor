@@ -122,36 +122,31 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
         futures = {}
         finished_jobs = {}
+        ready_jobs = []
+        not_finished = set(jobs.keys())
         rc = 0
         jobs = jobs.copy()
-        while jobs or futures:
+        while jobs or ready_jobs or futures:
             # determine "ready" jobs
-            ready_jobs = []
-            for package_name, job in jobs.items():
+            for package_name, job in list(jobs.items()):
                 # a pending job is "ready" when all dependencies have finished
-                not_finished = set(jobs.keys()) | {
-                    f.identifier for f in futures.values()}
                 if not (set(job.dependencies) - {package_name}) & not_finished:
                     ready_jobs.append((
-                        package_name, job,
-                        recursive_dependent_counts[package_name]))
+                        -recursive_dependent_counts[package_name],
+                        package_name, job))
+                    del jobs[package_name]
 
             # order the ready jobs, jobs with more dependents first
-            ready_jobs.sort(key=lambda r: -r[2])
+            ready_jobs.sort()
 
-            # take "ready" jobs
-            take_jobs = []
-            for package_name, job, _ in ready_jobs:
+            # take "ready" jobs and pass them to the executor
+            while ready_jobs:
                 # don't schedule more jobs then workers
                 # to prevent starting further jobs when a job fails
                 if args.parallel_workers:
                     if len(futures) + len(take_jobs) >= args.parallel_workers:
                         break
-                take_jobs.append((package_name, job))
-                del jobs[package_name]
-
-            # pass them to the executor
-            for package_name, job in take_jobs:
+                *_, job = ready_jobs.pop(0)
                 assert iscoroutinefunction(job.__call__), \
                     'Job is not a coroutine'
                 future = asyncio.ensure_future(job())
@@ -171,6 +166,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             for done_future in done_futures:
                 job = futures[done_future]
                 del futures[done_future]
+                not_finished.remove(job.identifier)
                 # get result without raising an exception
                 if done_future.cancelled():
                     result = signal.SIGINT
@@ -194,6 +190,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                     if on_error in (OnError.interrupt, OnError.skip_pending):
                         # skip pending jobs
                         jobs.clear()
+                        ready_jobs.clear()
 
                     if on_error == OnError.skip_downstream:
                         # skip downstream jobs of failed one
