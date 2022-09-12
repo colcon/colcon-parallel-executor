@@ -57,7 +57,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             default=max_workers_default,
             metavar='NUMBER',
             help='The maximum number of packages to process in parallel, '
-                 "or '0' for no limit."
+                 "or '0' for no limit "
                  '(default: {max_workers_default})'.format_map(locals()))
 
     def execute(self, args, jobs, *, on_error=OnError.interrupt):  # noqa: D102
