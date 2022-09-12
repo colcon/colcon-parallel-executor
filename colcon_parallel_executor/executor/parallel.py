@@ -31,6 +31,53 @@ def counting_number(value):
     return value
 
 
+class BuildGraph:
+
+    class Node:
+
+        def __init__(self, job):
+            self.job = job
+            self.upstream = set()
+            self.downstream = set()
+
+    def __init__(self):
+        self.nodes = {}
+        self.ready = set()
+
+    def push(self, job):
+        node = Node(job)
+        for i, n in self.nodes.items():
+            if job.identifier in n.job.dependencies:
+                node.downstream.add(n)
+                n.upstream.add(node)
+                self.ready.discard(i)
+            elif n.job.identifier in job.dependencies:
+                node.upstream.add(n)
+                n.downstream.add(node)
+        self.nodes[job.identifier] = node
+        if not node.upstream:
+            self.ready.add(job.idenitifier)
+
+    async def run(self, identifier):
+        self.ready.remove(identifier)
+        node = self.nodes[identifier]
+        try:
+            rc = await node.job()
+            if rc:
+                for d in node.downstream:
+                    del self.nodes[d.job.idenitifier]
+            return rc
+        except:
+            for d in node.downstream:
+                del self.nodes[d.job.idenitifier]
+            node.downstream.clear()
+            raise
+        finally:
+            for d in node.downstream:
+                d.upstream.remove(identifier)
+            del self.nodes[idenitifier]
+
+
 class ParallelExecutorExtension(ExecutorExtensionPoint):
     """
     Process multiple packages in parallel.
