@@ -21,6 +21,14 @@ from colcon_core.subprocess import SIGINT_RESULT
 logger = colcon_logger.getChild(__name__)
 
 
+def counting_number(value):
+    """Convert a number greater than or equal to zero."""
+    value = int(value)
+    if value < 0:
+        raise ValueError()
+    return value
+
+
 class ParallelExecutorExtension(ExecutorExtensionPoint):
     """
     Process multiple packages in parallel.
@@ -45,10 +53,11 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 max_workers_default, len(os.sched_getaffinity(0)))
         parser.add_argument(
             '--parallel-workers',
-            type=int,
+            type=counting_number,
             default=max_workers_default,
             metavar='NUMBER',
-            help='The maximum number of packages to process in parallel '
+            help='The maximum number of packages to process in parallel, '
+                 "or '0' for no limit "
                  '(default: {max_workers_default})'.format_map(locals()))
 
     def execute(self, args, jobs, *, on_error=OnError.interrupt):  # noqa: D102
@@ -131,8 +140,9 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             for package_name, job, _ in ready_jobs:
                 # don't schedule more jobs then workers
                 # to prevent starting further jobs when a job fails
-                if len(futures) + len(take_jobs) >= args.parallel_workers:
-                    break
+                if args.parallel_workers:
+                    if len(futures) + len(take_jobs) >= args.parallel_workers:
+                        break
                 take_jobs.append((package_name, job))
                 del jobs[package_name]
 
