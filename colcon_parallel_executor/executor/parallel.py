@@ -31,51 +31,125 @@ def counting_number(value):
     return value
 
 
+class GenericDecorator:
+    """A generic class decorator."""
+
+    def __init__(self, decoree, **kwargs):
+        """
+        Create a new decorated class instance.
+
+        :param decoree: The instance to decorate
+        :param **kwargs: The keyword arguments are set as attributes on this
+          instance
+        """
+        assert '_decoree' not in kwargs
+        kwargs['_decoree'] = decoree
+        for k, v in kwargs.items():
+            self.__dict__[k] = v
+
+    def __getattr__(self, name):
+        """
+        Get an attribute from this decorator if it exists or the decoree.
+
+        :param str name: The name of the attribute
+        :returns: The attribute value
+        """
+        return getattr(self.__dict__['_decoree'], name)
+
+    def __setattr__(self, name, value):
+        """
+        Set an attribute value on this decorator if it exists or the decoree.
+
+        :param str name: The name of the attribute
+        :param value: The attribute value
+        """
+        # overwrite existing attribute
+        if name in self.__dict__:
+            self.__dict__[name] = value
+            return
+        # set attribute on decoree
+        setattr(self.__dict__['_decoree'], name, value)
+
+
 class BuildGraph:
 
     class Node:
+
+        __slots__ = ('job', 'upstream', 'downstream')
 
         def __init__(self, job):
             self.job = job
             self.upstream = set()
             self.downstream = set()
 
-    def __init__(self):
-        self.nodes = {}
-        self.ready = set()
+        def __lt__(self, other):
+            return self.job.identifier < other.job.identifier
 
-    def push(self, job):
-        node = Node(job)
-        for i, n in self.nodes.items():
-            if job.identifier in n.job.dependencies:
+    def __init__(self):
+        self.nodes = set()
+        self.ready = set()
+        self._queue = asyncio.PriorityQueue()
+
+    def push(self, node):
+        for n in self.nodes:
+            if node.job.identifier in n.job.dependencies:
                 node.downstream.add(n)
                 n.upstream.add(node)
-                self.ready.discard(i)
-            elif n.job.identifier in job.dependencies:
+                self.ready.discard(n)
+            elif n.job.identifier in node.job.dependencies:
                 node.upstream.add(n)
                 n.downstream.add(node)
-        self.nodes[job.identifier] = node
+        self.nodes.add(node)
         if not node.upstream:
-            self.ready.add(job.idenitifier)
+            self.ready.add(node)
 
-    async def run(self, identifier):
-        self.ready.remove(identifier)
-        node = self.nodes[identifier]
+    def enqueue(self, nodes):
+        for n in tuple(nodes):
+            self._queue.put_nowait(n)
+
+    async def dequeue(self):
+        res = []
+        while True:
+            try:
+                res.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        if res:
+            return res
+        res.append(await self._queue.get())
+        while True:
+            try:
+                res.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return res
+
+    async def run(self, node):
         try:
-            rc = await node.job()
-            if rc:
-                for d in node.downstream:
-                    del self.nodes[d.job.idenitifier]
-            return rc
-        except:
-            for d in node.downstream:
-                del self.nodes[d.job.idenitifier]
-            node.downstream.clear()
-            raise
+            return await node.job()
         finally:
-            for d in node.downstream:
-                d.upstream.remove(identifier)
-            del self.nodes[idenitifier]
+            for n in node.downstream:
+                n.upstream.discard(node)
+                if not n.upstream:
+                    print(f'NOW READY: {n.job.identifier}')
+                    self.ready.add(n)
+            self.nodes.discard(node)
+
+
+class RecursiveDependentsPriorityBuildGraphDecorator(GenericDecorator):
+
+    def enqueue(self, nodes):
+        for n in nodes:
+            print(f'PUSHED {n.job.identifier}')
+        nodes = ((len(n.downstream), n) for n in nodes)
+        return self._decoree.enqueue(nodes)
+
+    async def dequeue(self):
+        nodes = await self._decoree.dequeue()
+        for n in nodes:
+            print(f'POPPED {n[-1].job.identifier}')
+        return [n[-1] for n in nodes]
+
 
 
 class ParallelExecutorExtension(ExecutorExtensionPoint):
@@ -158,15 +232,71 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         return result
 
     async def _execute(self, args, jobs, *, on_error):
-        # count the number of dependent jobs for each job
-        # in order to process jobs with more dependent jobs first
-        recursive_dependent_counts = {}
-        for package_name, job in jobs.items():
-            # ignore "self" dependency
-            recursive_dependent_counts[package_name] = len([
-                j for name, j in jobs.items()
-                if package_name != name and package_name in j.dependencies])
+        # construct the build graph
+        graph = BuildGraph()
+        graph = RecursiveDependentsPriorityBuildGraphDecorator(graph)
+        for job in jobs.values():
+            graph.push(BuildGraph.Node(job))
 
+        # prime the queue
+        graph.enqueue(graph.ready)
+        graph.ready.clear()
+
+        taker = asyncio.ensure_future(graph.dequeue())
+        futures = {taker: None}
+        rc = 0
+        while graph.nodes:
+            # wait for futures
+            assert futures, 'No futures'
+            done_futures, _pending = await asyncio.wait(
+                futures.keys(), timeout=30, return_when=FIRST_COMPLETED)
+
+            # check results of done futures
+            if not done_futures:  # timeout
+                print(
+                    '[Processing: %s]' % ', '.join(sorted(
+                        n.job.identifier for n in futures.values())))
+
+            for done_future in done_futures:
+                node = futures.pop(done_future)
+                if node is None:
+                    taker = asyncio.ensure_future(graph.dequeue())
+                    futures[taker] = None
+                    for n in done_future.result():
+                        future = asyncio.ensure_future(graph.run(n))
+                        futures[future] = n
+                    continue
+
+                if done_future.cancelled():
+                    result = signal.SIGINT
+                elif done_future.exception():
+                    result = done_future.exception()
+                    if isinstance(result, KeyboardInterrupt):
+                        result = signal.SIGINT
+                else:
+                    result = done_future.result()
+                    if result == SIGINT_RESULT:
+                        result = signal.SIGINT
+
+                # if any job returned a SIGINT overwrite the return code
+                # this should override a potentially earlier set error code
+                # in the case where on_error isn't set to OnError.interrupt
+                # otherwise set the error code if it is the first
+                if result is signal.SIGINT or result and not rc:
+                    rc = result
+
+            graph.enqueue(graph.ready)
+            graph.ready.clear()
+
+        taker.cancel()
+        try:
+            await taker
+        except asyncio.CancelledError:
+            pass
+
+        return rc
+
+    async def _never(self):
         futures = {}
         finished_jobs = {}
         rc = 0

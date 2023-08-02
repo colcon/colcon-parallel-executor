@@ -3,6 +3,9 @@ asyncio
 colcon
 contextlib
 coroutine
+decoree
+dequeue
+enqueue
 getaffinity
 getpid
 getsignal
