@@ -4,6 +4,8 @@ colcon
 contextlib
 coroutine
 getaffinity
+getpid
+getsignal
 iscoroutinefunction
 iterdir
 noqa
