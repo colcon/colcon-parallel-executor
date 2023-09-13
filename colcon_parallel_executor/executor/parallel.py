@@ -96,11 +96,13 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             return 1
         finally:
             # HACK on Windows closing the event loop seems to hang after Ctrl-C
-            # even though no futures are pending
-            if sys.platform != 'win32':
+            # even though no futures are pending, but appears fixed in py3.8
+            if sys.platform != 'win32' or sys.version_info >= (3, 8):
                 logger.debug('closing loop')
                 loop.close()
                 logger.debug('loop closed')
+            else:
+                logger.debug('skipping loop closure')
         result = future.result()
         logger.debug(
             "run_until_complete finished with '{result}'".format_map(locals()))
