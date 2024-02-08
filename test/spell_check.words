@@ -8,10 +8,12 @@ getpid
 getsignal
 iscoroutinefunction
 iterdir
+linter
 noqa
 parallelization
 pathlib
 plugin
+pydocstyle
 pytest
 returncode
 scspell
