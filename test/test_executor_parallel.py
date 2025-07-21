@@ -28,7 +28,6 @@ class Job1(Job):
             task_context=None)
 
     async def __call__(self, *args, **kwargs):
-        global ran_jobs
         ran_jobs.append(self.identifier)
 
 
@@ -62,7 +61,6 @@ class Job4(Job):
             task_context=None)
 
     async def __call__(self, *args, **kwargs):
-        global ran_jobs
         try:
             await asyncio.sleep(0.05)
         except asyncio.CancelledError:
@@ -89,7 +87,6 @@ class Job6(Job):
             task_context=None)
 
     async def __call__(self, *args, **kwargs):
-        global ran_jobs
         ran_jobs.append(self.identifier)
 
 
@@ -101,12 +98,10 @@ class Job7(Job):
             task_context=None)
 
     async def __call__(self, *args, **kwargs):
-        global ran_jobs
         ran_jobs.append(self.identifier)
 
 
 def test_parallel():
-    global ran_jobs
     extension = ParallelExecutorExtension()
 
     args = SimpleNamespace(parallel_workers=2)
@@ -175,7 +170,6 @@ class Job8(Job):
             task_context=None)
 
     async def __call__(self, *args, **kwargs):
-        global ran_jobs
         await asyncio.sleep(3)
         ran_jobs.append(self.identifier)
 
@@ -188,8 +182,6 @@ def restore_sigint_handler():
 
 
 def test_parallel_keyboard_interrupt(restore_sigint_handler):
-    global ran_jobs
-
     if sys.platform == 'win32':
         pytest.skip(
             'Skipping keyboard interrupt test since the signal will cause '
