@@ -5,6 +5,7 @@ import asyncio
 from concurrent.futures import ALL_COMPLETED
 from concurrent.futures import FIRST_COMPLETED
 from contextlib import suppress
+from inspect import iscoroutinefunction
 import logging
 import os
 import signal
@@ -150,7 +151,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
             # pass them to the executor
             for package_name, job in take_jobs:
-                assert asyncio.iscoroutinefunction(job.__call__), \
+                assert iscoroutinefunction(job.__call__), \
                     'Job is not a coroutine'
                 future = asyncio.ensure_future(job())
                 futures[future] = job
