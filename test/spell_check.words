@@ -6,6 +6,7 @@ coroutine
 getaffinity
 getpid
 getsignal
+isatty
 iscoroutinefunction
 iterdir
 linter
