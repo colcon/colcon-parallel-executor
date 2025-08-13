@@ -4,6 +4,7 @@
 import sys
 
 from colcon_core.event_handler import EventHandlerExtensionPoint
+from colcon_core.output_style import Style
 from colcon_core.plugin_system import satisfies_version
 from colcon_parallel_executor.event.executor import ParallelStatus
 
@@ -29,4 +30,8 @@ class ParallelStatusEventHandler(EventHandlerExtensionPoint):
         data = event[0]
 
         if isinstance(data, ParallelStatus):
-            print(f"[Processing: {', '.join(sorted(data.processing))}]")
+            jobs = [
+                Style.PackageOrJobName(job)
+                for job in sorted(data.processing)
+            ]
+            print(f"[Processing: {', '.join(jobs)}]")
