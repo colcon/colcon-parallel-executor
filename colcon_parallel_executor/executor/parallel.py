@@ -123,7 +123,8 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         futures = {}
         finished_jobs = {}
         ready_jobs = []
-        not_finished = set(jobs.keys())
+        not_finished = set(jobs.keys()) | {
+            job.identifier for job in jobs.values()}
         rc = 0
         jobs = jobs.copy()
         while jobs or ready_jobs or futures:
@@ -132,12 +133,12 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 # a pending job is "ready" when all dependencies have finished
                 if not (set(job.dependencies) - {package_name}) & not_finished:
                     ready_jobs.append((
-                        -recursive_dependent_counts[package_name],
-                        package_name, job))
+                        package_name, job,
+                        recursive_dependent_counts[package_name]))
                     del jobs[package_name]
 
             # order the ready jobs, jobs with more dependents first
-            ready_jobs.sort()
+            ready_jobs.sort(key=lambda r: -r[2])
 
             # take "ready" jobs and pass them to the executor
             while ready_jobs:
@@ -146,7 +147,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 if args.parallel_workers:
                     if len(futures) >= args.parallel_workers:
                         break
-                *_, job = ready_jobs.pop(0)
+                _, job, *_ = ready_jobs.pop(0)
                 assert iscoroutinefunction(job.__call__), \
                     'Job is not a coroutine'
                 future = asyncio.ensure_future(job())
