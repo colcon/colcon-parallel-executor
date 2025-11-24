@@ -144,7 +144,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 # don't schedule more jobs then workers
                 # to prevent starting further jobs when a job fails
                 if args.parallel_workers:
-                    if len(futures) + len(take_jobs) >= args.parallel_workers:
+                    if len(futures) >= args.parallel_workers:
                         break
                 *_, job = ready_jobs.pop(0)
                 assert iscoroutinefunction(job.__call__), \
