@@ -1,5 +1,7 @@
 apache
+argparse
 asyncio
+capsys
 colcon
 contextlib
 coroutine
@@ -16,9 +18,11 @@ pathlib
 plugin
 pydocstyle
 pytest
+readouterr
 returncode
 scspell
 setuptools
 sigint
 thomas
 traceback
+unittest
