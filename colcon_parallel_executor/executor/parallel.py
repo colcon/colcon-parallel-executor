@@ -19,6 +19,14 @@ from colcon_core.plugin_system import satisfies_version
 from colcon_core.subprocess import new_event_loop
 from colcon_core.subprocess import SIGINT_RESULT
 from colcon_parallel_executor.event.executor import ParallelStatus
+from colcon_parallel_executor.resource_guard import \
+    add_resource_guard_arguments
+from colcon_parallel_executor.resource_guard import \
+    initialize_resource_guard_extensions
+from colcon_parallel_executor.resource_guard import \
+    run_guarded_job
+from colcon_parallel_executor.resource_guard.execution_policy import \
+    ExecutionPolicyGuard
 
 logger = colcon_logger.getChild(__name__)
 
@@ -61,6 +69,8 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             help='The maximum number of packages to process in parallel, '
                  "or '0' for no limit "
                  '(default: {max_workers_default})'.format_map(locals()))
+
+        add_resource_guard_arguments(parser=parser)
 
     def execute(self, args, jobs, *, on_error=OnError.interrupt):  # noqa: D102
         # avoid debug message from asyncio when colcon uses debug log level
@@ -111,6 +121,11 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
         return result
 
     async def _execute(self, args, jobs, *, on_error):
+        guards = await initialize_resource_guard_extensions(args)
+
+        policy_guard = ExecutionPolicyGuard(on_error)
+        guards.append(policy_guard)
+
         # count the number of dependent jobs for each job
         # in order to process jobs with more dependent jobs first
         recursive_dependent_counts = {}
@@ -142,11 +157,6 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             # take "ready" jobs
             take_jobs = []
             for package_name, job, _ in ready_jobs:
-                # don't schedule more jobs then workers
-                # to prevent starting further jobs when a job fails
-                if args.parallel_workers:
-                    if len(futures) + len(take_jobs) >= args.parallel_workers:
-                        break
                 take_jobs.append((package_name, job))
                 del jobs[package_name]
 
@@ -154,7 +164,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             for package_name, job in take_jobs:
                 assert iscoroutinefunction(job.__call__), \
                     'Job is not a coroutine'
-                future = asyncio.ensure_future(job())
+                future = asyncio.ensure_future(run_guarded_job(job, guards))
                 futures[future] = job
 
             # wait for futures
