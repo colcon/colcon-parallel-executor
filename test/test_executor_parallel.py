@@ -413,3 +413,29 @@ def test_parallel_exception_skip_pending():
     assert isinstance(rc, RuntimeError)
     assert ran_jobs == []
     ran_jobs.clear()
+
+
+class ImmediateJob(Job):
+
+    def __init__(self, identifier, rc):
+        super().__init__(
+            identifier=identifier, dependencies=set(), task=None,
+            task_context=None)
+        self.rc = rc
+
+    async def __call__(self, *args, **kwargs):
+        return self.rc
+
+
+def test_simultaneous_completion_prefers_first_started():
+    extension = ParallelExecutorExtension()
+    args = SimpleNamespace(parallel_workers=2)
+
+    # repeat: set iteration order varies run to run, so a single
+    # pass would only catch the bug ~50% of the time
+    for _ in range(50):
+        jobs = OrderedDict()
+        jobs['early'] = ImmediateJob('early', 3)
+        jobs['late'] = ImmediateJob('late', 7)
+        rc = extension.execute(args, jobs, on_error=OnError.continue_)
+        assert rc == 3, f'expected first-started rc 3, got {rc}'
