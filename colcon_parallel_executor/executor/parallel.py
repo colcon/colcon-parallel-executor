@@ -168,7 +168,9 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                     f.identifier for f in futures.values())))
 
             # check results of done futures
-            for done_future in done_futures:
+            for done_future in [
+                f for f in futures.keys() if f in done_futures
+            ]:
                 job = futures[done_future]
                 del futures[done_future]
                 # get result without raising an exception

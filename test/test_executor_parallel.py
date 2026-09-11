@@ -110,7 +110,7 @@ def test_parallel():
 
     args = SimpleNamespace(parallel_workers=2)
     jobs = OrderedDict()
-    jobs['one'] = Job1()
+    jobs['job1'] = Job1()
 
     # success
     rc = extension.execute(args, jobs)
@@ -119,8 +119,8 @@ def test_parallel():
     ran_jobs.clear()
 
     # return error code
-    jobs['two'] = Job2()
-    jobs['four'] = Job4()
+    jobs['job2'] = Job2()
+    jobs['job4'] = Job4()
     rc = extension.execute(args, jobs)
     assert rc == 2
     assert ran_jobs == ['job1']
@@ -144,22 +144,22 @@ def test_parallel():
     ran_jobs.clear()
 
     # continue after error, keeping first error code
-    jobs['five'] = Job5()
+    jobs['job5'] = Job5()
     rc = extension.execute(args, jobs, on_error=OnError.continue_)
     assert rc == 2
     assert ran_jobs == ['job1', 'job4']
     ran_jobs.clear()
 
     # continue but skip downstream
-    jobs['six'] = Job6()
-    jobs['seven'] = Job7()
+    jobs['job6'] = Job6()
+    jobs['job7'] = Job7()
     rc = extension.execute(args, jobs, on_error=OnError.skip_downstream)
     assert rc == 2
     assert ran_jobs == ['job1', 'job7', 'job4']
     ran_jobs.clear()
 
     # exception
-    jobs['two'] = Job3()
+    jobs['job2'] = Job3()
     rc = extension.execute(args, jobs)
     assert isinstance(rc, RuntimeError)
     assert ran_jobs == ['job1']
@@ -400,3 +400,42 @@ def test_parallel_workers_zero():
     assert rc == 0
     assert set(ran_jobs) == {'job1', 'job2'}
     ran_jobs.clear()
+
+
+def test_parallel_exception_skip_pending():
+    extension = ParallelExecutorExtension()
+    args = SimpleNamespace(parallel_workers=1)
+    jobs = OrderedDict()
+    jobs['job3'] = Job3()
+    jobs['job4'] = Job4()
+
+    rc = extension.execute(args, jobs, on_error=OnError.skip_pending)
+    assert isinstance(rc, RuntimeError)
+    assert ran_jobs == []
+    ran_jobs.clear()
+
+
+class ImmediateJob(Job):
+
+    def __init__(self, identifier, rc):
+        super().__init__(
+            identifier=identifier, dependencies=set(), task=None,
+            task_context=None)
+        self.rc = rc
+
+    async def __call__(self, *args, **kwargs):
+        return self.rc
+
+
+def test_simultaneous_completion_prefers_first_started():
+    extension = ParallelExecutorExtension()
+    args = SimpleNamespace(parallel_workers=2)
+
+    # repeat: set iteration order varies run to run, so a single
+    # pass would only catch the bug ~50% of the time
+    for _ in range(50):
+        jobs = OrderedDict()
+        jobs['early'] = ImmediateJob('early', 3)
+        jobs['late'] = ImmediateJob('late', 7)
+        rc = extension.execute(args, jobs, on_error=OnError.continue_)
+        assert rc == 3, f'expected first-started rc 3, got {rc}'
