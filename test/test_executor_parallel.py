@@ -19,9 +19,23 @@ from colcon_core.subprocess import SIGINT_RESULT
 from colcon_parallel_executor.executor.parallel import counting_number
 from colcon_parallel_executor.executor.parallel \
     import ParallelExecutorExtension
+from colcon_parallel_executor.resource_guard.worker_limiter import \
+    WorkerLimiterGuard
 import pytest
 
 ran_jobs = []
+
+
+@pytest.fixture(autouse=True, scope='module')
+def default_execution_policies():
+    """Mock extension discovery to isolate executor tests."""
+    guard = WorkerLimiterGuard()
+    with patch(
+        'colcon_parallel_executor.resource_guard.'
+        'instantiate_extensions',
+        return_value={'default_worker_limiter': guard}
+    ):
+        yield
 
 
 class Job1(Job):
