@@ -17,7 +17,7 @@ class JobIncompleteError(Exception):
     Raised when a job does not finish successfully.
 
     If `result` is None, the job was cleanly skipped before execution.
-    If `result` is not None, the job failed with a non-zero exit code.
+    If `result` is not None, the job failed with this non-zero exit code.
     """
 
     def __init__(self, result=None):  # noqa: D107
@@ -137,10 +137,13 @@ async def run_guarded_job(job, guards):
     """
     try:
         async with AsyncExitStack() as stack:
-            for provider in guards:
-                guard = provider.get_guard(job)
-                if guard is not None:
-                    await stack.enter_async_context(guard)
+            try:
+                for provider in guards:
+                    guard = provider.get_guard(job)
+                    if guard is not None:
+                        await stack.enter_async_context(guard)
+            except asyncio.CancelledError:
+                raise JobIncompleteError(None)
             await asyncio.sleep(0)
             result = await job()
             if result:
