@@ -19,9 +19,23 @@ from colcon_core.subprocess import SIGINT_RESULT
 from colcon_parallel_executor.executor.parallel import counting_number
 from colcon_parallel_executor.executor.parallel \
     import ParallelExecutorExtension
+from colcon_parallel_executor.resource_guard.worker_limiter import \
+    WorkerLimiterGuard
 import pytest
 
 ran_jobs = []
+
+
+@pytest.fixture(autouse=True, scope='module')
+def default_execution_policies():
+    """Mock extension discovery to isolate executor tests."""
+    guard = WorkerLimiterGuard()
+    with patch(
+        'colcon_parallel_executor.resource_guard.'
+        'instantiate_extensions',
+        return_value={'default_worker_limiter': guard}
+    ):
+        yield
 
 
 class Job1(Job):
@@ -164,6 +178,28 @@ def test_parallel():
     assert isinstance(rc, RuntimeError)
     assert ran_jobs == ['job1']
     ran_jobs.clear()
+
+
+@pytest.mark.parametrize('on_error', list(OnError))
+def test_parallel_failure_with_queued_jobs(on_error):
+    extension = ParallelExecutorExtension()
+
+    args = SimpleNamespace(parallel_workers=1)
+    jobs = OrderedDict()
+    jobs['job2'] = Job2()
+    queued_jobs = ['queued{}'.format(index) for index in range(4)]
+    for identifier in queued_jobs:
+        jobs[identifier] = Job1(identifier)
+
+    try:
+        rc = extension.execute(args, jobs, on_error=on_error)
+        assert rc == 2
+        if on_error in (OnError.interrupt, OnError.skip_pending):
+            assert ran_jobs == []
+        else:
+            assert ran_jobs == queued_jobs
+    finally:
+        ran_jobs.clear()
 
 
 class Job8(Job):

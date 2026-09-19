@@ -1,6 +1,9 @@
+aenter
+aexit
 apache
 argparse
 asyncio
+autouse
 capsys
 colcon
 contextlib
@@ -20,6 +23,8 @@ pydocstyle
 pytest
 readouterr
 returncode
+retval
+rtype
 scspell
 setuptools
 sigint
