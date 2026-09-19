@@ -196,3 +196,29 @@ def test_add_resource_guard_arguments_exception():
     parser = object()
     # This should handle the exception internally and not raise
     add_resource_guard_arguments(parser, extensions=extensions)
+
+
+def test_resource_guard_extension_priority_order():
+    """Verify resource guards process highest priority first."""
+    class MockGuard(ResourceGuardExtensionPoint):
+
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        async def initialize(self, args):
+            pass
+
+    guard_high = MockGuard('high')
+    guard_low = MockGuard('low')
+
+    # get_resource_guard_extensions order: highest priority first
+    extensions = OrderedDict([
+        (200, OrderedDict([('high', guard_high)])),
+        (100, OrderedDict([('low', guard_low)])),
+    ])
+
+    args = SimpleNamespace()
+    guards = run_until_complete(
+        initialize_resource_guard_extensions(args, extensions=extensions))
+    assert guards == [guard_high, guard_low]

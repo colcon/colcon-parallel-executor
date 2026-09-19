@@ -36,7 +36,11 @@ class ResourceGuardExtensionPoint:
     """The version of the resource guard extension interface."""
     EXTENSION_POINT_VERSION = '1.0'
 
-    """The priority of resource guard extensions."""
+    """
+    The priority of resource guard extensions.
+
+    Extensions with a higher priority value are processed earlier.
+    """
     PRIORITY = 100
 
     def __init__(self):  # noqa: D107
@@ -97,7 +101,7 @@ def add_resource_guard_arguments(parser, *, extensions=None):
     """Add command line arguments for the resource guard extensions."""
     if extensions is None:
         extensions = get_resource_guard_extensions()
-    for priority in sorted(extensions.keys()):
+    for priority in extensions.keys():
         for name, guard in extensions[priority].items():
             try:
                 retval = guard.add_arguments(parser=parser)
@@ -116,7 +120,7 @@ async def initialize_resource_guard_extensions(args, *, extensions=None):
     if extensions is None:
         extensions = get_resource_guard_extensions()
     guards = []
-    for priority in sorted(extensions.keys()):
+    for priority in extensions.keys():
         for name, guard in extensions[priority].items():
             try:
                 retval = await guard.initialize(args)
