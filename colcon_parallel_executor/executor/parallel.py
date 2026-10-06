@@ -8,6 +8,7 @@ from contextlib import suppress
 from inspect import iscoroutinefunction
 import logging
 import os
+import re
 import signal
 import sys
 import traceback
@@ -29,6 +30,70 @@ def counting_number(value):
     if value < 0:
         raise ValueError()
     return value
+
+
+# This is the same pattern colcon-cmake uses to decide whether MAKEFLAGS
+# already limits the number of jobs, in which case it doesn't pass its own
+# -j and -l. It can't be imported from there because the executor should not
+# depend on a build system extension. A shared helper in colcon-core could
+# replace both copies.
+_MAKEFLAGS_JOB_FLAG = re.compile(
+    r'(?:^|\s)'
+    r'(-?(?:j|l)(?:\s*[0-9]+|\s|$))'
+    r'|'
+    r'(?:^|\s)'
+    r'((?:--)?(?:jobs|load-average)(?:(?:=|\s+)[0-9]+|(?:\s|$)))')
+
+
+def get_job_limit_environment(jobs, env):
+    """
+    Get the environment variables limiting the jobs of each package build.
+
+    ``CMAKE_BUILD_PARALLEL_LEVEL`` is always set, CMake 3.12 and newer pass
+    it to the native build tool on the command line (which also covers
+    Ninja) where it takes precedence over ``MAKEFLAGS``.
+
+    ``MAKEFLAGS`` is only set when the existing value doesn't limit the
+    number of jobs or the load average, in which case ``-j<jobs>`` is added
+    in front of the existing flags (and after a first word of bundled single
+    letter flags).
+    An existing limit is left untouched.
+
+    :param int jobs: The maximum number of jobs per package build
+    :param dict env: The environment variables to merge with
+    :returns: The environment variables to set
+    :rtype: dict
+    """
+    variables = {'CMAKE_BUILD_PARALLEL_LEVEL': str(jobs)}
+    makeflags = env.get('MAKEFLAGS', '')
+    if not _MAKEFLAGS_JOB_FLAG.search(makeflags):
+        flags = makeflags.split()
+        # GNU make exports single letter flags bundled in the first word
+        # without a leading dash. Everything after '--' is a variable
+        # definition rather than a flag.
+        index = 1 if flags and not flags[0].startswith('-') else 0
+        flags.insert(index, '-j{jobs}'.format_map(locals()))
+        variables['MAKEFLAGS'] = ' '.join(flags)
+    return variables
+
+
+def _update_environment(variables):
+    """
+    Update environment variables and return their previous values.
+
+    :param dict variables: The environment variables to set, a value of
+      ``None`` removes the variable
+    :returns: The previous values in the same format
+    :rtype: dict
+    """
+    previous = {}
+    for name, value in variables.items():
+        previous[name] = os.environ.get(name)
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    return previous
 
 
 class ParallelExecutorExtension(ExecutorExtensionPoint):
@@ -61,6 +126,16 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
             help='The maximum number of packages to process in parallel, '
                  "or '0' for no limit "
                  '(default: {max_workers_default})'.format_map(locals()))
+        parser.add_argument(
+            '--parallel-jobs-per-worker',
+            type=counting_number,
+            default=0,
+            metavar='NUMBER',
+            help='The maximum number of jobs each package build may run in '
+                 'parallel, e.g. compiler processes under make or Ninja, by '
+                 'setting CMAKE_BUILD_PARALLEL_LEVEL and, unless it already '
+                 "limits the jobs, MAKEFLAGS, or '0' for no limit "
+                 '(default: 0)')
 
     def execute(self, args, jobs, *, on_error=OnError.interrupt):  # noqa: D102
         # avoid debug message from asyncio when colcon uses debug log level
@@ -72,6 +147,18 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
 
         coro = self._execute(args, jobs, on_error=on_error)
         future = asyncio.ensure_future(coro, loop=loop)
+
+        # Limit the number of jobs of each package build through the
+        # environment inherited by the tasks
+        previous_environment = {}
+        jobs_per_worker = getattr(args, 'parallel_jobs_per_worker', 0)
+        if jobs_per_worker:
+            previous_environment = _update_environment(
+                get_job_limit_environment(jobs_per_worker, os.environ))
+            logger.debug(
+                'limiting each package build to {jobs_per_worker} jobs'
+                .format_map(locals()))
+
         try:
             logger.debug('run_until_complete')
             loop.run_until_complete(future)
@@ -97,6 +184,7 @@ class ParallelExecutorExtension(ExecutorExtensionPoint):
                 'Exception in job execution: {e}\n{exc}'.format_map(locals()))
             return 1
         finally:
+            _update_environment(previous_environment)
             # HACK on Windows closing the event loop seems to hang after Ctrl-C
             # even though no futures are pending, but appears fixed in py3.8
             if sys.platform != 'win32' or sys.version_info >= (3, 8):

@@ -2,6 +2,7 @@ apache
 argparse
 asyncio
 capsys
+cmake
 colcon
 contextlib
 coroutine
@@ -11,7 +12,9 @@ getsignal
 isatty
 iscoroutinefunction
 iterdir
+jobserver
 linter
+makeflags
 noqa
 parallelization
 pathlib
@@ -20,6 +23,7 @@ pydocstyle
 pytest
 readouterr
 returncode
+rtype
 scspell
 setuptools
 sigint
